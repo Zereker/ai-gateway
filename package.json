@@ -6,8 +6,19 @@
   "scripts": {
     "test": "node --test",
     "build": "wrangler deploy --dry-run --outdir dist",
-    "deploy": "wrangler deploy",
+    "db:migrations:apply": "wrangler d1 migrations apply DB --remote",
+    "deploy": "npm run db:migrations:apply && wrangler deploy",
     "provider:secret": "node scripts/provider-secret.js"
+  },
+  "cloudflare": {
+    "bindings": {
+      "PROXY_TOKEN": {
+        "description": "Generate a random value with `npm run provider:secret -- generate-key`. Clients use this as the gateway Bearer token."
+      },
+      "CONFIG_ENCRYPTION_KEY": {
+        "description": "Generate a separate 32-byte base64 key with `npm run provider:secret -- generate-key`. Store it securely; losing it prevents decrypting provider API keys in D1."
+      }
+    }
   },
   "devDependencies": {
     "wrangler": "4.98.0"
