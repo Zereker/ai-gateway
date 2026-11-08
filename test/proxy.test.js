@@ -25,10 +25,27 @@ const records = {
   'openai-responses': { name: 'openai-responses', protocol: 'openai-responses', base_url: 'https://api.openai.com', auth_type: 'bearer', encrypted_api_key: await encrypt('openai-response-secret', 'openai-responses'), enabled: 1 },
   gemini: { name: 'gemini', protocol: 'gemini', base_url: 'https://generativelanguage.googleapis.com', auth_type: 'x-goog-api-key', encrypted_api_key: await encrypt('gemini-secret', 'gemini'), enabled: 1 },
 };
+const databaseReads = new Map();
+function makeDatabase() {
+  return {
+    prepare() {
+      return {
+        bind(name) {
+          return {
+            first: async () => {
+              databaseReads.set(name, (databaseReads.get(name) || 0) + 1);
+              return records[name] ?? null;
+            },
+          };
+        },
+      };
+    },
+  };
+}
 const env = {
   PROXY_TOKEN: 'gateway-secret',
   CONFIG_ENCRYPTION_KEY: toBase64(encryptionKey),
-  DB: { prepare() { return { bind(name) { return { first: async () => records[name] ?? null }; } }; } },
+  DB: makeDatabase(),
 };
 function request(path, { method = 'POST', headers = {}, body = '{}' } = {}) {
   return new Request(`https://gateway.example${path}`, {
@@ -68,6 +85,10 @@ test('routes all supported protocols, installs upstream credentials and preserve
       if (authName) assert.equal(calls.at(-1).init.headers.get(authName), authValue);
       assert.equal(calls.at(-1).init.redirect, 'manual');
     }
+    await worker.fetch(request('/anthropic/v1/messages'), env);
+    for (const name of ['anthropic', 'openai-chat', 'openai-responses', 'gemini']) {
+      assert.equal(databaseReads.get(name), 1, `expected one D1 read for ${name} within the cache TTL`);
+    }
   } finally { stub.mock.restore(); }
 });
 
@@ -75,7 +96,7 @@ test('binds encrypted provider credentials to their database record', async () =
   const original = records.gemini.encrypted_api_key;
   records.gemini.encrypted_api_key = records.anthropic.encrypted_api_key;
   try {
-    const response = await worker.fetch(request('/gemini/v1beta/models/gemini-2.5-pro:generateContent'), env);
+    const response = await worker.fetch(request('/gemini/v1beta/models/gemini-2.5-pro:generateContent'), { ...env, DB: makeDatabase() });
     assert.equal(response.status, 503);
     assert.deepEqual(await response.json(), { error: { message: 'Provider credentials could not be read' } });
   } finally { records.gemini.encrypted_api_key = original; }
@@ -83,12 +104,12 @@ test('binds encrypted provider credentials to their database record', async () =
 
 test('rejects invalid provider endpoints and hides upstream failures', async () => {
   records.anthropic.base_url = 'http://127.0.0.1';
-  const invalid = await worker.fetch(request('/anthropic/v1/messages'), env);
+  const invalid = await worker.fetch(request('/anthropic/v1/messages'), { ...env, DB: makeDatabase() });
   assert.equal(invalid.status, 503);
   records.anthropic.base_url = 'https://api.anthropic.com';
   const stub = mock.method(globalThis, 'fetch', async () => { throw new Error('private upstream detail'); });
   try {
-    const response = await worker.fetch(request('/anthropic/v1/messages'), env);
+    const response = await worker.fetch(request('/anthropic/v1/messages'), { ...env, DB: makeDatabase() });
     assert.equal(response.status, 502);
     assert.deepEqual(await response.json(), { error: { message: 'Upstream request failed' } });
   } finally { stub.mock.restore(); }
