@@ -12,7 +12,7 @@ Cloudflare Worker proxy with path-based provider selection. It forwards requests
 | `/gemini/v1beta/models/{model}:generateContent` | `gemini` | Gemini generateContent |
 | `/gemini/v1beta/models/{model}:streamGenerateContent` | `gemini` | Gemini streaming |
 
-Every request uses `Authorization: Bearer <PROXY_TOKEN>`. Provider credentials are encrypted with AES-GCM before insertion into D1. The 32-byte encryption key and gateway token are Worker Secrets; neither belongs in the database. Provider base URLs must use HTTPS and are stored in D1. The Worker never accepts an upstream host from the request.
+Every request uses `Authorization: Bearer <PROXY_TOKEN>`. Provider credentials are encrypted with AES-GCM before insertion into D1. The 32-byte encryption key and gateway token are Worker Secrets; neither belongs in the database. Provider base URLs must use HTTPS and are stored in D1. The Worker never accepts an upstream host from the request. Decrypted provider settings are cached in each Worker isolate for 60 seconds, so ordinary requests do not query D1 every time; configuration edits take up to one minute to appear, and cold isolates load from D1.
 
 ## Deploy with Cloudflare
 
