@@ -1,4 +1,6 @@
 const encoder = new TextEncoder();
+const providerCacheByDatabase = new WeakMap();
+const PROVIDER_CACHE_TTL_MS = 60_000;
 
 class HttpError extends Error {
   constructor(status, message, headers = {}) {
@@ -32,6 +34,31 @@ class ProviderRepository {
 
   async get(name) {
     if (!this.database || !this.encryptionKey) throw new HttpError(503, 'Provider store is not configured');
+
+    let cache = providerCacheByDatabase.get(this.database);
+    if (!cache) {
+      cache = new Map();
+      providerCacheByDatabase.set(this.database, cache);
+    }
+
+    const cached = cache.get(name);
+    if (cached && cached.expiresAt > Date.now()) return cached.promise;
+
+    const entry = { expiresAt: Number.POSITIVE_INFINITY, promise: null };
+    entry.promise = this.#load(name)
+      .then((provider) => {
+        entry.expiresAt = Date.now() + PROVIDER_CACHE_TTL_MS;
+        return provider;
+      })
+      .catch((error) => {
+        if (cache.get(name) === entry) cache.delete(name);
+        throw error;
+      });
+    cache.set(name, entry);
+    return entry.promise;
+  }
+
+  async #load(name) {
     const row = await this.database.prepare(
       'SELECT name, protocol, base_url, auth_type, encrypted_api_key, enabled FROM providers WHERE name = ? AND enabled = 1',
     ).bind(name).first();
