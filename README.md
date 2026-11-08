@@ -54,9 +54,38 @@ Repeat with these provider values as needed:
 
 The upsert operation lets you rotate keys or update provider configuration. Gemini streaming requests can include `alt=sse`; its key is sent in the `x-goog-api-key` header.
 
+## Rotate the OpenRouter key
+
+The script updates every provider record using `https://openrouter.ai/api` and Bearer authentication. It reads the current `CONFIG_ENCRYPTION_KEY` from ignored `.dev.vars` and the new OpenRouter key from stdin; the key is stored encrypted in D1.
+
+```sh
+read -s OPENROUTER_API_KEY
+printf '%s' "$OPENROUTER_API_KEY" | npm run provider:rotate -- --apply
+unset OPENROUTER_API_KEY
+```
+
 ## Use the gateway
 
 Send an Anthropic Messages request to `https://<worker-domain>/anthropic/v1/messages` with `Authorization: Bearer <PROXY_TOKEN>` and `anthropic-version: 2023-06-01`. OpenAI-compatible clients use the `/openai` path prefix; Gemini clients use `/gemini`. Request bodies remain in each provider's native format.
+
+## Personal local deployment
+
+Keep account-specific settings such as your custom domain and D1 database ID in the ignored `wrangler.local.jsonc`. The tracked `wrangler.jsonc` remains the generic Cloudflare deployment config. Do not store secret values in either file. Apply migrations and deploy your personal Worker with:
+
+```sh
+npx wrangler d1 migrations apply DB --remote --config wrangler.local.jsonc
+npx wrangler deploy --config wrangler.local.jsonc
+```
+
+## Verify a deployed Worker
+
+After deployment, run the end-to-end smoke test. It checks gateway authentication and method handling, then sends short non-streaming and streaming requests through all four protocol routes. It needs `curl`, `jq`, and `PROXY_TOKEN` in ignored `.dev.vars` (or the environment). The default OpenRouter model is `nvidia/nemotron-3-ultra-550b-a55b:free`; free endpoints can still be rate limited.
+
+```sh
+./scripts/verify-deployment.sh
+```
+
+Set `WORKER_URL` to check another deployment. Override models with `VERIFY_MODEL`, `VERIFY_ANTHROPIC_MODEL`, `VERIFY_OPENAI_CHAT_MODEL`, `VERIFY_OPENAI_RESPONSES_MODEL`, and `VERIFY_GEMINI_MODEL`. Gemini uses its native Google protocol and therefore needs an enabled `gemini` provider configured in D1; a free OpenRouter model alone does not configure that provider.
 
 ## Development
 

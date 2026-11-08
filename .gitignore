@@ -10,3 +10,4 @@ dist/
 coverage/
 *.sqlite
 *.sqlite3
+/wrangler.local.jsonc

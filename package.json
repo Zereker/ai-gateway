@@ -8,7 +8,8 @@
     "build": "wrangler deploy --dry-run --outdir dist",
     "db:migrations:apply": "wrangler d1 migrations apply DB --remote",
     "deploy": "npm run db:migrations:apply && wrangler deploy",
-    "provider:secret": "node scripts/provider-secret.js"
+    "provider:secret": "node scripts/provider-secret.js",
+    "provider:rotate": "node scripts/rotate-openrouter-key.js"
   },
   "cloudflare": {
     "bindings": {
@@ -21,6 +22,6 @@
     }
   },
   "devDependencies": {
-    "wrangler": "4.98.0"
+    "wrangler": "^4.158.0"
   }
 }
