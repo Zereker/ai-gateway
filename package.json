@@ -1,0 +1,15 @@
+{
+  "name": "ai-gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Self-hosted multi-provider AI API gateway on Cloudflare Workers",
+  "scripts": {
+    "test": "node --test",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "deploy": "wrangler deploy",
+    "provider:secret": "node scripts/provider-secret.js"
+  },
+  "devDependencies": {
+    "wrangler": "4.98.0"
+  }
+}
