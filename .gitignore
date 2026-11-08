@@ -4,6 +4,8 @@ dist/
 .dev.vars*
 .env*
 !.env.example
+.idea/
+*.iml
 .DS_Store
 coverage/
 *.sqlite
