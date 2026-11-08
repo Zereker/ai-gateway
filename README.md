@@ -1,6 +1,8 @@
 # AI Gateway
 
-Cloudflare Worker proxy with path-based provider selection. The first version forwards requests in their native protocol; it does not convert request or response formats.
+Cloudflare Worker proxy with path-based provider selection. It forwards requests in their native protocol; it does not convert request or response formats.
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FZereker%2Fai-gateway)
 
 | Worker path | Provider record | Protocol |
 | --- | --- | --- |
@@ -10,36 +12,26 @@ Cloudflare Worker proxy with path-based provider selection. The first version fo
 | `/gemini/v1beta/models/{model}:generateContent` | `gemini` | Gemini generateContent |
 | `/gemini/v1beta/models/{model}:streamGenerateContent` | `gemini` | Gemini streaming |
 
-Every request uses `Authorization: Bearer <PROXY_TOKEN>`. Provider credentials are encrypted with AES-GCM before insertion into D1. The 32-byte encryption key and gateway token are Wrangler Secrets; neither belongs in the database. Provider base URLs must use HTTPS and are stored in D1. The Worker never accepts an upstream host from the request.
+Every request uses `Authorization: Bearer <PROXY_TOKEN>`. Provider credentials are encrypted with AES-GCM before insertion into D1. The 32-byte encryption key and gateway token are Worker Secrets; neither belongs in the database. Provider base URLs must use HTTPS and are stored in D1. The Worker never accepts an upstream host from the request.
 
-## Setup
+## Deploy with Cloudflare
 
-Create the D1 database in the same Cloudflare account used by Wrangler:
+Click **Deploy to Cloudflare** above. Cloudflare will create a copy of this repository in your GitHub account, provision the D1 database, run the configured deployment command (including the schema migration), and deploy the Worker. Enter values for both secrets when prompted:
 
-```sh
-npx wrangler d1 create ai-gateway
-```
+- `PROXY_TOKEN`: a random gateway token used by clients.
+- `CONFIG_ENCRYPTION_KEY`: a separate random 32-byte base64 key used to encrypt provider API keys.
 
-Copy the returned database ID into `wrangler.jsonc`, then initialize the schema:
+Generate a key with `npm run provider:secret -- generate-key`. Keep the encryption key in a password manager; losing it makes stored provider credentials unrecoverable.
 
-```sh
-npx wrangler d1 migrations apply ai-gateway --remote
-```
+## Add provider credentials
 
-Generate a random 32-byte encryption key and save it in your password manager:
+After deployment, clone your Cloudflare-created repository and install dependencies:
 
 ```sh
-npm run provider:secret -- generate-key
+npm ci
 ```
 
-Set that value as the encryption Worker Secret, along with a separate gateway token. Wrangler prompts for the values interactively:
-
-```sh
-npx wrangler secret put PROXY_TOKEN
-npx wrangler secret put CONFIG_ENCRYPTION_KEY
-```
-
-Use the built-in helper to create a provider seed statement. Enter the same key you saved as the `CONFIG_ENCRYPTION_KEY` Worker Secret, then enter the provider API key at the hidden prompt:
+Use the same `CONFIG_ENCRYPTION_KEY` value entered during deployment. Create an encrypted provider upsert statement; the API key is read from stdin and never printed:
 
 ```sh
 read -s CONFIG_ENCRYPTION_KEY
@@ -47,19 +39,33 @@ export CONFIG_ENCRYPTION_KEY
 read -s UPSTREAM_API_KEY
 printf '%s' "$UPSTREAM_API_KEY" | npm run provider:secret -- add anthropic anthropic-messages https://api.anthropic.com x-api-key > provider.sql
 unset CONFIG_ENCRYPTION_KEY UPSTREAM_API_KEY
+npx wrangler d1 execute DB --remote --file ./provider.sql
+rm provider.sql
 ```
 
-The helper writes only a SQL statement containing an AES-GCM ciphertext (`v1.base64(iv).base64(ciphertext)`) authenticated to the provider name; the plaintext API key is read from stdin and never printed. Repeat with each provider's settings. Apply the statement using `npx wrangler d1 execute ai-gateway --remote --file ./provider.sql`, then delete the local file. Supported `auth_type` values are `bearer`, `x-api-key`, and `x-goog-api-key`. Seed names, protocols, endpoints, and auth types:
+Repeat with these provider values as needed:
 
-```text
-anthropic       anthropic-messages          x-api-key
-openai-chat     openai-chat-completions     bearer
-openai-responses openai-responses           bearer
-gemini          gemini                      x-goog-api-key
+| Name | Protocol | Base URL | Auth type |
+| --- | --- | --- | --- |
+| `anthropic` | `anthropic-messages` | `https://api.anthropic.com` | `x-api-key` |
+| `openai-chat` | `openai-chat-completions` | `https://api.openai.com` | `bearer` |
+| `openai-responses` | `openai-responses` | `https://api.openai.com` | `bearer` |
+| `gemini` | `gemini` | `https://generativelanguage.googleapis.com` | `x-goog-api-key` |
+
+The upsert operation lets you rotate keys or update provider configuration. Gemini streaming requests can include `alt=sse`; its key is sent in the `x-goog-api-key` header.
+
+## Use the gateway
+
+Send an Anthropic Messages request to `https://<worker-domain>/anthropic/v1/messages` with `Authorization: Bearer <PROXY_TOKEN>` and `anthropic-version: 2023-06-01`. OpenAI-compatible clients use the `/openai` path prefix; Gemini clients use `/gemini`. Request bodies remain in each provider's native format.
+
+## Development
+
+Use Node.js 22 or newer.
+
+```sh
+npm ci
+npm test
+npm run build
 ```
 
-Set each provider's base URL to its official API origin (or a trusted compatible origin). The worker appends the route suffix from the fixed path table. Gemini's query string is retained, including `alt=sse` for streaming; its API key is sent in the `x-goog-api-key` header.
-
-After configuring the `anthropic` provider, send a normal Anthropic Messages request to `https://<worker-domain>/anthropic/v1/messages` with `Authorization: Bearer <PROXY_TOKEN>` and `anthropic-version: 2023-06-01`. For OpenAI compatible clients, set the base URL to `https://<worker-domain>/openai`; Gemini clients should use the `/gemini` path prefix. The gateway selects the upstream from the path and does not translate request bodies.
-
-Run `npm test` for local tests, `npm run build` for packaging, and `npm run deploy` to deploy after database setup and provider seeding. Protect the gateway token: anyone holding it can spend against every configured provider.
+Protect the gateway token: anyone holding it can spend against every configured provider. See [SECURITY.md](SECURITY.md) for reporting security issues.
